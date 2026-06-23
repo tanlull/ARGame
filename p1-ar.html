@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>เกมจับคู่มหัศจรรย์ AR — คำศัพท์ &amp; บวกเลข ป.1</title>
+
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com"></script>
+
+<!-- Google Font: Mali (ฟอนต์ไทยน่ารัก อ่านง่าย) -->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Mali:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+<!-- MediaPipe Hands -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+
+<style>
+  :root{ --glass: rgba(255,255,255,.16); --glass-bd: rgba(255,255,255,.35); }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body{ margin:0; height:100%; font-family:'Mali',system-ui,sans-serif; overflow:hidden; }
+  body{
+    background: linear-gradient(135deg,#6d28d9 0%,#2563eb 45%,#0ea5e9 100%);
+    color:#fff;
+  }
+  #stage{ position:fixed; inset:0; overflow:hidden; }
+  #cam{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; transform:scaleX(-1); opacity:0; transition:opacity .4s; }
+  #cam.on{ opacity:.55; }
+  #board{ position:absolute; inset:0; width:100%; height:100%; z-index:2; touch-action:none; }
+  /* Glassmorphism */
+  .glass{
+    background:var(--glass);
+    border:1px solid var(--glass-bd);
+    border-radius:28px;
+    backdrop-filter:blur(14px);
+    -webkit-backdrop-filter:blur(14px);
+    box-shadow:0 12px 40px rgba(0,0,0,.28);
+  }
+  .btn{
+    font-family:inherit; font-weight:700; cursor:pointer; border:none;
+    transition:transform .12s ease, box-shadow .12s ease, filter .12s ease;
+    box-shadow:0 8px 22px rgba(0,0,0,.28);
+  }
+  .btn:hover{ transform:translateY(-3px) scale(1.03); filter:brightness(1.06); }
+  .btn:active{ transform:translateY(0) scale(.98); }
+  .screen{ position:absolute; inset:0; z-index:5; display:flex; align-items:center; justify-content:center; padding:20px; }
+  .hidden{ display:none !important; }
+  .pop{ animation:pop .4s cubic-bezier(.2,1.4,.4,1) both; }
+  @keyframes pop{ from{ transform:scale(.7); opacity:0 } to{ transform:scale(1); opacity:1 } }
+  .float{ animation:float 3s ease-in-out infinite; }
+  @keyframes float{ 0%,100%{ transform:translateY(0) } 50%{ transform:translateY(-10px) } }
+  #toast{
+    position:absolute; left:50%; top:14%; transform:translateX(-50%) translateY(-10px);
+    z-index:8; padding:14px 28px; border-radius:999px; font-size:24px; font-weight:700;
+    background:rgba(0,0,0,.45); border:1px solid var(--glass-bd); opacity:0; transition:opacity .25s, transform .25s;
+    pointer-events:none; white-space:nowrap;
+  }
+  #toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+  #banner{
+    position:absolute; inset:0; z-index:7; display:flex; align-items:center; justify-content:center;
+    pointer-events:none; opacity:0; transition:opacity .3s;
+  }
+  #banner.show{ opacity:1; }
+  .pill{ padding:8px 18px; border-radius:999px; font-weight:700; }
+</style>
+</head>
+<body>
+
+<div id="stage">
+  <video id="cam" playsinline muted></video>
+  <canvas id="board"></canvas>
+
+  <!-- HUD (แถบข้อมูลด้านบน) -->
+  <div id="hud" class="hidden" style="position:absolute;z-index:4;inset:0;pointer-events:none;">
+    <div style="position:absolute;top:14px;left:14px;right:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+      <div class="glass pill" id="lvlText" style="font-size:20px;">ด่าน 1</div>
+      <div class="glass pill" style="font-size:20px;">คะแนน: <span id="scoreText">0</span></div>
+      <div class="glass pill" style="font-size:20px;">จับคู่: <span id="pairText">0/4</span></div>
+      <div style="flex:1"></div>
+      <button id="modeBtn" class="btn glass pill" style="font-size:18px;color:#fff;background:rgba(255,255,255,.18);pointer-events:auto;">📷 โหมดกล้อง</button>
+    </div>
+    <div class="glass pill" id="hintBar" style="position:absolute;left:50%;bottom:14px;transform:translateX(-50%);font-size:18px;max-width:92%;text-align:center;">
+      หยิบการ์ดคำตอบไปวางบนช่องที่มีรูปให้ถูกนะ
+    </div>
+  </div>
+
+  <!-- Toast + Banner -->
+  <div id="toast"></div>
+  <div id="banner"><div class="glass pop" style="padding:30px 50px;font-size:48px;font-weight:700;text-align:center;" id="bannerText"></div></div>
+
+  <!-- หน้าเริ่มต้น -->
+  <div id="startScreen" class="screen">
+    <div class="glass float" style="max-width:680px;width:100%;padding:44px 36px;text-align:center;">
+      <div style="font-size:74px;line-height:1;">🎈🔤➕</div>
+      <h1 style="font-size:42px;margin:14px 0 6px;font-weight:700;">เกมจับคู่มหัศจรรย์ AR</h1>
+      <p style="font-size:24px;margin:0 0 6px;">คำศัพท์ &amp; บวกเลข สำหรับน้อง ป.1</p>
+      <p style="font-size:18px;opacity:.9;margin:0 0 26px;">ใช้มือผ่านกล้อง หรือใช้เมาส์/นิ้วก็เล่นได้!</p>
+      <button id="toHowto" class="btn" style="font-size:30px;padding:18px 48px;border-radius:999px;background:#fde047;color:#7c2d12;">เข้าสู่เกม ▶</button>
+    </div>
+  </div>
+
+  <!-- หน้าคำแนะนำ -->
+  <div id="howtoScreen" class="screen hidden">
+    <div class="glass pop" style="max-width:740px;width:100%;padding:40px 34px;text-align:center;">
+      <h2 style="font-size:34px;margin:0 0 22px;font-weight:700;">วิธีเล่น 🕹️</h2>
+      <div style="display:flex;flex-direction:column;gap:16px;font-size:23px;text-align:left;max-width:560px;margin:0 auto;">
+        <div class="glass" style="padding:14px 20px;border-radius:18px;">👌 <b>ใช้มือ:</b> เอานิ้วโป้งแตะนิ้วชี้ (หนีบ) เพื่อ <b>หยิบ</b> การ์ด แล้วแยกนิ้วออกเพื่อ <b>วาง</b></div>
+        <div class="glass" style="padding:14px 20px;border-radius:18px;">🖱️ <b>ใช้เมาส์/นิ้ว:</b> กดค้างที่การ์ดแล้วลากไปวางในช่องที่ถูก</div>
+        <div class="glass" style="padding:14px 20px;border-radius:18px;">🎯 วางการ์ด <b>คำตอบ</b> ให้ตรงกับ <b>รูป/โจทย์</b> ในช่องด้านล่าง</div>
+        <div class="glass" style="padding:14px 20px;border-radius:18px;">⭐ จับคู่ถูกได้คะแนน เล่นครบ 3 รอบ (12 ข้อ) รับ 300 คะแนน!</div>
+      </div>
+      <div style="font-size:18px;opacity:.9;margin:20px 0 24px;">
+        จุดวงกลม: <span style="color:#38bdf8;font-weight:700;">ฟ้า</span>=ปกติ
+        <span style="color:#facc15;font-weight:700;">เหลือง</span>=ชี้โดนการ์ด
+        <span style="color:#ef4444;font-weight:700;">แดง</span>=วางผิด
+        <span style="color:#4ade80;font-weight:700;">เขียว</span>=กำลังถือ/ถูก
+      </div>
+      <button id="toSubjects" class="btn" style="font-size:30px;padding:18px 50px;border-radius:999px;background:#4ade80;color:#064e3b;">เลือกวิชา →</button>
+    </div>
+  </div>
+
+  <!-- หน้าเลือกวิชา -->
+  <div id="subjectScreen" class="screen hidden">
+    <div class="glass pop" style="max-width:820px;width:100%;padding:34px 28px;text-align:center;">
+      <h2 style="font-size:34px;margin:0 0 6px;font-weight:700;">เลือกวิชาที่อยากเล่น 📚</h2>
+      <p style="font-size:18px;opacity:.92;margin:0 0 22px;">แต่ละวิชามีคลังข้อสอบ 50 ข้อ · เล่นครั้งละ 12 ข้อ (สุ่มใหม่ทุกครั้ง)</p>
+      <div id="subjectGrid" style="display:grid;grid-template-columns:repeat(2,1fr);gap:16px;"></div>
+    </div>
+  </div>
+
+  <!-- หน้าจบเกม -->
+  <div id="winScreen" class="screen hidden">
+    <div class="glass pop" style="max-width:660px;width:100%;padding:44px 36px;text-align:center;">
+      <div style="font-size:78px;line-height:1;">🎉🏆🎉</div>
+      <h2 style="font-size:44px;margin:10px 0 4px;font-weight:700;">สำเร็จ!</h2>
+      <p style="font-size:24px;margin:0 0 6px;">เล่นจบวิชา <b><span id="finalSubject">—</span></b> แล้ว เก่งมาก!</p>
+      <p style="font-size:30px;font-weight:700;margin:10px 0 26px;">คะแนนรวม: <span id="finalScore">0</span> / <span id="finalTotal">300</span></p>
+      <div style="display:flex;gap:14px;justify-content:center;flex-wrap:wrap;">
+        <button id="replay" class="btn" style="font-size:24px;padding:14px 30px;border-radius:999px;background:#fde047;color:#7c2d12;">เล่นวิชานี้อีกครั้ง 🔁</button>
+        <button id="toMenu" class="btn" style="font-size:24px;padding:14px 30px;border-radius:999px;background:#a78bfa;color:#2e1065;">เลือกวิชาอื่น 📚</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   คลังข้อสอบ (Question Bank) — แก้ไข/เพิ่มได้ที่นี่
+   • วิชาคำศัพท์ใช้คลังรูป VOCAB (50 รายการ) ร่วมกันทั้งอังกฤษ/ไทย
+   • วิชาเลขสุ่มสร้างคลัง 50 ข้ออัตโนมัติ
+   q = โจทย์ (รูป/สมการ) อยู่ในช่อง , a = คำตอบ (อยู่บนการ์ด)
+============================================================ */
+const PER_ROUND = 4;   // การ์ดต่อรอบ
+const ROUNDS    = 3;   // จำนวนรอบต่อการเล่น 1 วิชา (รวม 12 ข้อ)
+
+// คลังคำศัพท์ 50 รายการ {e:emoji, en, th}
+const VOCAB = [
+  {e:'🐱',en:'CAT',th:'แมว'}, {e:'🐶',en:'DOG',th:'หมา'}, {e:'🐘',en:'ELEPHANT',th:'ช้าง'},
+  {e:'🐟',en:'FISH',th:'ปลา'}, {e:'🐦',en:'BIRD',th:'นก'}, {e:'🐷',en:'PIG',th:'หมู'},
+  {e:'🐮',en:'COW',th:'วัว'}, {e:'🐴',en:'HORSE',th:'ม้า'}, {e:'🐰',en:'RABBIT',th:'กระต่าย'},
+  {e:'🐵',en:'MONKEY',th:'ลิง'}, {e:'🐯',en:'TIGER',th:'เสือ'}, {e:'🦁',en:'LION',th:'สิงโต'},
+  {e:'🐻',en:'BEAR',th:'หมี'}, {e:'🐸',en:'FROG',th:'กบ'}, {e:'🦆',en:'DUCK',th:'เป็ด'},
+  {e:'🐔',en:'CHICKEN',th:'ไก่'}, {e:'🐍',en:'SNAKE',th:'งู'}, {e:'🐢',en:'TURTLE',th:'เต่า'},
+  {e:'🐝',en:'BEE',th:'ผึ้ง'}, {e:'🦋',en:'BUTTERFLY',th:'ผีเสื้อ'},
+  {e:'🍎',en:'APPLE',th:'แอปเปิล'}, {e:'🍌',en:'BANANA',th:'กล้วย'}, {e:'🍊',en:'ORANGE',th:'ส้ม'},
+  {e:'🍇',en:'GRAPES',th:'องุ่น'}, {e:'🍉',en:'WATERMELON',th:'แตงโม'}, {e:'🍓',en:'STRAWBERRY',th:'สตรอว์เบอร์รี'},
+  {e:'🥭',en:'MANGO',th:'มะม่วง'}, {e:'🍍',en:'PINEAPPLE',th:'สับปะรด'}, {e:'🍞',en:'BREAD',th:'ขนมปัง'},
+  {e:'🥚',en:'EGG',th:'ไข่'}, {e:'🍚',en:'RICE',th:'ข้าว'}, {e:'🥛',en:'MILK',th:'นม'},
+  {e:'🎂',en:'CAKE',th:'เค้ก'}, {e:'🍦',en:'ICE CREAM',th:'ไอศกรีม'}, {e:'🍬',en:'CANDY',th:'ลูกอม'},
+  {e:'☀️',en:'SUN',th:'พระอาทิตย์'}, {e:'🌙',en:'MOON',th:'พระจันทร์'}, {e:'⭐',en:'STAR',th:'ดาว'},
+  {e:'☁️',en:'CLOUD',th:'เมฆ'}, {e:'🌈',en:'RAINBOW',th:'สายรุ้ง'}, {e:'🌳',en:'TREE',th:'ต้นไม้'},
+  {e:'🌸',en:'FLOWER',th:'ดอกไม้'}, {e:'🏠',en:'HOUSE',th:'บ้าน'}, {e:'🚗',en:'CAR',th:'รถยนต์'},
+  {e:'⛵',en:'BOAT',th:'เรือ'}, {e:'📖',en:'BOOK',th:'หนังสือ'}, {e:'⚽',en:'BALL',th:'ลูกบอล'},
+  {e:'🎈',en:'BALLOON',th:'ลูกโป่ง'}, {e:'☂️',en:'UMBRELLA',th:'ร่ม'}, {e:'🔑',en:'KEY',th:'กุญแจ'},
+];
+
+// สร้างคลังโจทย์เลข 50 ข้อ (ผลลัพธ์ไม่เกิน 20)
+function genAdd(){
+  const all=[];
+  for(let a=1;a<=10;a++) for(let b=1;b<=10;b++) all.push({q:`${a} + ${b}`, a:String(a+b)});
+  return shuffle(all).slice(0,50);
+}
+function genSub(){
+  const all=[];
+  for(let a=2;a<=20;a++) for(let b=1;b<=10;b++){ if(b>a) continue; all.push({q:`${a} - ${b}`, a:String(a-b)}); }
+  return shuffle(all).slice(0,50);
+}
+
+// วิชาทั้งหมด (classification) — แต่ละวิชามีคลัง 50 ข้อ
+const SUBJECTS = [
+  {id:'en',  name:'คำศัพท์อังกฤษ', icon:'🔤', mode:'pic',  color:'#3b82f6', tip:'จับคู่รูป กับ คำศัพท์ภาษาอังกฤษ', getBank:()=>VOCAB.map(v=>({q:v.e,a:v.en}))},
+  {id:'th',  name:'คำศัพท์ไทย',    icon:'📕', mode:'pic',  color:'#ec4899', tip:'จับคู่รูป กับ คำศัพท์ภาษาไทย',    getBank:()=>VOCAB.map(v=>({q:v.e,a:v.th}))},
+  {id:'add', name:'บวกเลข',        icon:'➕', mode:'math', color:'#22c55e', tip:'จับคู่โจทย์บวกเลข กับ คำตอบ',     getBank:()=>genAdd()},
+  {id:'sub', name:'ลบเลข',         icon:'➖', mode:'math', color:'#f97316', tip:'จับคู่โจทย์ลบเลข กับ คำตอบ',      getBank:()=>genSub()},
+];
+const CARD_COLORS = ['#f97316','#3b82f6','#ec4899','#22c55e','#a855f7','#14b8a6'];
+const CURSOR = { blue:'#38bdf8', yellow:'#facc15', red:'#ef4444', green:'#4ade80' };
+const EMOJI_FONT = "'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji'";
+
+/* ---------- ตัวแปรหลัก ---------- */
+const stage = document.getElementById('stage');
+const canvas = document.getElementById('board');
+const ctx = canvas.getContext('2d');
+const video = document.getElementById('cam');
+
+let cssW=0, cssH=0;
+let roundIdx = 0, score = 0, matched = 0;
+let currentSubject = null, roundsData = [];
+let slots = [], cards = [];
+let grabbed = null, grabDX = 0, grabDY = 0, hoverCard = null;
+let state = 'menu';          // menu | play | clear | win
+let prevDown = false;
+let wrongTimer = 0;
+let lastT = performance.now();
+
+/* pointer แบบรวม (มาจากมือ หรือ เมาส์/สัมผัส) */
+const mouse = { x:0, y:0, down:false, has:false };
+const hand  = { seen:false, t:0, x:0, y:0, sx:null, sy:null, pinch:false, ratio:1.5, lm:null };
+// จูนการตรวจจับมือ (ปรับค่าได้)
+const PINCH_CLOSE = 0.52;   // ratio ต่ำกว่านี้ = เริ่มหนีบ/จับการ์ด (หนีบง่ายขึ้น)
+const PINCH_OPEN  = 0.68;   // ratio สูงกว่านี้ = ปล่อย/วางการ์ด (เว้นช่วงกันสั่น)
+const SMOOTH_K    = 22;     // ยิ่งมากยิ่งนิ่ง (กรอง jitter ของตำแหน่งมือ)
+const HAND_GRACE  = 260;    // ms คงตำแหน่งมือไว้ชั่วครู่เมื่อภาพหลุดเฟรม
+let useCamera = true, camStarted = false, camFailed = false, camObj = null, handsObj = null;
+
+/* ---------- เสียงตอบสนอง ---------- */
+let actx = null;
+function ensureAudio(){ if(!actx){ try{ actx = new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} } if(actx && actx.state==='suspended') actx.resume(); }
+function tone(freq, dur, type='sine', when=0, gain=0.18){
+  if(!actx) return;
+  const o=actx.createOscillator(), g=actx.createGain();
+  o.type=type; o.frequency.value=freq;
+  const t0=actx.currentTime+when;
+  g.gain.setValueAtTime(0.0001,t0);
+  g.gain.exponentialRampToValueAtTime(gain,t0+0.02);
+  g.gain.exponentialRampToValueAtTime(0.0001,t0+dur);
+  o.connect(g).connect(actx.destination); o.start(t0); o.stop(t0+dur+0.02);
+}
+const sndCorrect = ()=>{ ensureAudio(); tone(660,0.12,'sine',0); tone(880,0.16,'sine',0.10); };
+const sndWrong   = ()=>{ ensureAudio(); tone(180,0.18,'square',0,0.12); };
+const sndWin     = ()=>{ ensureAudio(); [523,659,784,1047].forEach((f,i)=>tone(f,0.2,'sine',i*0.12)); };
+
+/* ---------- จัดขนาด canvas (รองรับจอความละเอียดสูง) ---------- */
+function resizeCanvas(){
+  const r = stage.getBoundingClientRect();
+  cssW = r.width; cssH = r.height;
+  const dpr = Math.min(window.devicePixelRatio||1, 2);
+  canvas.width = Math.round(cssW*dpr);
+  canvas.height = Math.round(cssH*dpr);
+  canvas.style.width = cssW+'px'; canvas.style.height = cssH+'px';
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+}
+window.addEventListener('resize', ()=>{ resizeCanvas(); if(state==='play'||state==='clear') layoutRound(true); });
+
+/* ---------- ตัวช่วย ---------- */
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+function shuffle(a){ a=a.slice(); for(let i=a.length-1;i>0;i--){ const j=(Math.random()*(i+1))|0; [a[i],a[j]]=[a[j],a[i]]; } return a; }
+function roundRect(x,y,w,h,r){
+  if(ctx.roundRect){ ctx.beginPath(); ctx.roundRect(x,y,w,h,r); return; }
+  ctx.beginPath();
+  ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath();
+}
+function fitFont(text, maxW, base, weight=700){
+  let s = base; ctx.font = `${weight} ${s}px 'Mali',sans-serif`;
+  while(ctx.measureText(text).width > maxW && s > 10){ s-=1; ctx.font = `${weight} ${s}px 'Mali',sans-serif`; }
+  return s;
+}
+const inRect=(x,y,r,pad=0)=> x>=r.x-pad && x<=r.x+r.w+pad && y>=r.y-pad && y<=r.y+r.h+pad;
+
+/* ---------- วางตำแหน่งช่อง + การ์ด ของแต่ละรอบ ---------- */
+function layoutRound(preserve=false){
+  const pairs = roundsData[roundIdx];
+  const n = pairs.length;
+  const oldSlots = preserve ? slots : null;
+  const oldCards = preserve ? cards : null;
+
+  const slotW = clamp(cssW*0.20, 110, 190);
+  const slotH = clamp(cssH*0.26, 120, 185);
+  const gap   = clamp(cssW*0.03, 12, 40);
+  const totalW = n*slotW + (n-1)*gap;
+  const startX = (cssW-totalW)/2;
+  const slotY  = cssH - slotH - clamp(cssH*0.06, 18, 56);
+
+  slots = pairs.map((p,i)=>({ id:i, prompt:p.q, mode:currentSubject.mode, x:startX+i*(slotW+gap), y:slotY, w:slotW, h:slotH, filled:false, flash:0 }));
+
+  const cardW = clamp(cssW*0.19, 104, 176);
+  const cardH = clamp(cssH*0.12, 66, 98);
+  const margin = clamp(cssW*0.06, 18, 90);
+  const span = (cssW - 2*margin - cardW);
+  const topY = clamp(cssH*0.13, 26, 130);
+
+  cards = pairs.map((p,i)=>({ id:i, text:p.a, w:cardW, h:cardH, color:CARD_COLORS[i%CARD_COLORS.length], placed:false, bob:Math.random()*Math.PI*2, x:0, y:0, homeX:0, homeY:0 }));
+  const order = shuffle([...Array(n).keys()]);
+  order.forEach((cardIndex, pos)=>{
+    const c = cards[cardIndex];
+    c.homeX = margin + (n>1 ? span*(pos/(n-1)) : span/2);
+    c.homeY = topY + (pos%2)*(cardH*0.85);
+    c.x = c.homeX; c.y = c.homeY;
+  });
+
+  // คงความคืบหน้าไว้เมื่อปรับขนาดจอ
+  if(preserve && oldSlots){
+    slots.forEach(s=>{ const o=oldSlots.find(z=>z.id===s.id); if(o&&o.filled) s.filled=true; });
+    cards.forEach(c=>{ const o=oldCards.find(z=>z.id===c.id); if(o&&o.placed){ const s=slots.find(z=>z.id===c.id); c.placed=true; c.x=s.x+(s.w-c.w)/2; c.y=s.y+s.h-c.h-12; } });
+  }
+  // อัปเดต HUD
+  document.getElementById('lvlText').textContent = currentSubject.icon + ' ' + currentSubject.name + ' · รอบ ' + (roundIdx+1) + '/' + ROUNDS;
+  document.getElementById('hintBar').textContent = currentSubject.tip;
+  refreshHud();
+}
+function refreshHud(){
+  document.getElementById('scoreText').textContent = score;
+  const f = slots.filter(s=>s.filled).length;
+  document.getElementById('pairText').textContent = f + '/' + (slots.length||4);
+}
+
+/* ---------- เริ่มวิชา / เริ่มรอบ ---------- */
+function buildRounds(subject){
+  // สุ่มข้อจากคลัง 50 ให้ได้ 12 ข้อ โดย "คำตอบไม่ซ้ำกัน" (กันการ์ดซ้ำในรอบเดียวกัน)
+  const need = PER_ROUND*ROUNDS;
+  const bank = shuffle(subject.getBank());
+  const picked=[], used=new Set();
+  for(const it of bank){ if(used.has(it.a)) continue; used.add(it.a); picked.push(it); if(picked.length===need) break; }
+  for(const it of bank){ if(picked.length>=need) break; if(!picked.includes(it)) picked.push(it); }
+  roundsData = [];
+  for(let r=0;r<ROUNDS;r++) roundsData.push(picked.slice(r*PER_ROUND, (r+1)*PER_ROUND));
+}
+function startSubject(subject){
+  currentSubject = subject; score = 0;
+  document.getElementById('hud').classList.remove('hidden');
+  buildRounds(subject);
+  startRound(0);
+}
+function startRound(i){
+  roundIdx = i; matched = 0; grabbed = null; prevDown = false;
+  state = 'play';
+  layoutRound(false);
+}
+
+/* ---------- หาการ์ดที่อยู่ใต้ตำแหน่ง ---------- */
+function topCardAt(x,y){
+  for(let i=cards.length-1;i>=0;i--){ const c=cards[i]; if(!c.placed && inRect(x,y,c)) return c; }
+  return null;
+}
+// ใบที่คว้าได้: ต้องอยู่ "บนการ์ด" หรือชิดขอบเล็กน้อยเท่านั้น (แม่นยำ แต่เผื่อ jitter นิดหน่อย)
+function grabbable(x,y){
+  let best=null, bestD=Infinity;
+  for(const c of cards){
+    if(c.placed) continue;
+    const pad = Math.max(18, Math.min(c.w,c.h)*0.25);   // ระยะเผื่อรอบขอบการ์ด
+    if(inRect(x,y,c,pad)){
+      const d=Math.hypot(c.x+c.w/2-x, c.y+c.h/2-y);     // ถ้าโดนหลายใบ เลือกใบที่ใกล้กลางสุด
+      if(d<bestD){ bestD=d; best=c; }
+    }
+  }
+  return best;
+}
+
+/* ---------- กด / ปล่อย ---------- */
+function onPress(x,y){
+  if(state!=='play') return;
+  const pick = grabbable(x,y);
+  if(pick){ grabbed=pick; grabDX=x-pick.x; grabDY=y-pick.y; }
+}
+function onRelease(x,y){
+  if(!grabbed){ return; }
+  const c = grabbed; grabbed = null;
+  const slot = slots.find(s=>s.id===c.id);
+  const cx = c.x + c.w/2, cy = c.y + c.h/2;
+  if(slot && !slot.filled && inRect(cx,cy,slot,30)){
+    slot.filled = true; c.placed = true;
+    c.x = slot.x + (slot.w-c.w)/2; c.y = slot.y + slot.h - c.h - 12;
+    slot.flash = 0.6; score += 25; matched++;
+    sndCorrect(); toast(pickPraise()); refreshHud();
+    if(slots.every(s=>s.filled)) onRoundClear();
+  } else {
+    wrongTimer = 0.5; sndWrong(); toast('ลองอีกครั้งนะ 💪');
+    // การ์ดจะค่อย ๆ ลอยกลับที่เดิมเอง
+  }
+}
+const PRAISES = ['เก่งมาก! 🌟','ถูกต้อง! 👏','ยอดเยี่ยม! ✨','เยี่ยมไปเลย! 🎈'];
+const pickPraise = ()=> PRAISES[(Math.random()*PRAISES.length)|0];
+
+function onRoundClear(){
+  state = 'clear';
+  banner((roundIdx<ROUNDS-1) ? 'ผ่านรอบ '+(roundIdx+1)+'! 🎉' : 'รอบสุดท้ายผ่าน! 🎉');
+  setTimeout(()=>{
+    hideBanner();
+    if(roundIdx < ROUNDS-1){ startRound(roundIdx+1); }
+    else { winGame(); }
+  }, 1500);
+}
+function winGame(){
+  state = 'win';
+  sndWin();
+  document.getElementById('finalSubject').textContent = currentSubject.name;
+  document.getElementById('finalScore').textContent = score;
+  document.getElementById('finalTotal').textContent = PER_ROUND*ROUNDS*25;
+  document.getElementById('hud').classList.add('hidden');
+  show('winScreen');
+}
+
+/* ---------- Toast / Banner ---------- */
+let toastTimer=null;
+function toast(msg){
+  const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show');
+  clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove('show'),1100);
+}
+function banner(msg){ const b=document.getElementById('banner'); document.getElementById('bannerText').textContent=msg; b.classList.add('show'); }
+function hideBanner(){ document.getElementById('banner').classList.remove('show'); }
+
+/* ============================================================
+   DRAW LOOP
+============================================================ */
+function draw(now){
+  const dt = Math.min(0.05,(now-lastT)/1000); lastT=now;
+  if(wrongTimer>0) wrongTimer-=dt;
+  ctx.clearRect(0,0,cssW,cssH);
+
+  if(state==='play' || state==='clear'){
+    // เลือกแหล่งควบคุม: มือ (ถ้าเห็นล่าสุด) ไม่งั้นเมาส์/สัมผัส
+    const handFresh = (now-hand.t) < HAND_GRACE;
+    const p = handFresh ? hand : mouse;
+    const down = handFresh ? hand.pinch : mouse.down;
+
+    // การ์ดเป้าหมาย = ใบที่ใกล้เคอร์เซอร์ที่สุดและคว้าได้
+    hoverCard = (state==='play' && !grabbed) ? grabbable(p.x,p.y) : null;
+
+    // คว้า/ปล่อย — ระหว่างหนีบค้างไว้ จะพยายามคว้าใบที่ใกล้ที่สุดเรื่อย ๆ (คว้าง่ายขึ้นมาก)
+    if(down && !grabbed) onPress(p.x,p.y);
+    if(!down && prevDown) onRelease(p.x,p.y);
+    if(down && grabbed){ grabbed.x = p.x-grabDX; grabbed.y = p.y-grabDY; }
+    prevDown = down;
+
+    // การ์ดลอยขึ้นลงเบา ๆ — ใบที่ถูกเล็งจะ "หยุดนิ่ง" ให้คว้าง่าย
+    for(const c of cards){
+      if(c===grabbed || c.placed) continue;
+      const amp = (c===hoverCard) ? 0 : 4;
+      const bx=c.homeX, by=c.homeY+Math.sin(now/500+c.bob)*amp;
+      c.x += (bx-c.x)*0.16; c.y += (by-c.y)*0.16;
+    }
+
+    drawSlots();
+    drawCards(p, handFresh, down);
+    if(handFresh && hand.lm) drawHand(hand.lm);
+    drawCursor(p.x,p.y, cursorColor(p,down));
+  }
+  requestAnimationFrame(draw);
+}
+
+function drawSlots(){
+  for(const s of slots){
+    const green = s.filled || s.flash>0;
+    if(s.flash>0) s.flash-=0.02;
+    ctx.save();
+    roundRect(s.x,s.y,s.w,s.h,22);
+    ctx.fillStyle = green ? 'rgba(74,222,128,.28)' : 'rgba(255,255,255,.14)';
+    ctx.fill();
+    ctx.lineWidth = green ? 4 : 2.5;
+    ctx.strokeStyle = green ? 'rgba(74,222,128,.95)' : 'rgba(255,255,255,.55)';
+    ctx.stroke();
+    // โจทย์ (รูป/สมการ)
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    const cx = s.x+s.w/2;
+    if(s.mode==='pic'){
+      const fs = Math.min(s.h*0.5, s.w*0.6);
+      ctx.font = `${fs}px ${EMOJI_FONT}`;
+      ctx.fillStyle='#fff';
+      ctx.fillText(s.prompt, cx, s.y + s.h*(s.filled?0.34:0.42));
+    } else {
+      const txt = s.prompt + (s.filled ? ' =' : ' = ?');
+      const fs = fitFont(txt, s.w*0.84, Math.min(s.h*0.30, 34));
+      ctx.font = `700 ${fs}px 'Mali',sans-serif`;
+      ctx.fillStyle='#fff';
+      ctx.fillText(txt, cx, s.y + s.h*(s.filled?0.30:0.42));
+    }
+    ctx.restore();
+  }
+}
+
+function drawCards(p, handFresh, down){
+  // การ์ดที่ลงช่องแล้ว วาดเป็นป้ายในช่อง
+  for(const s of slots){
+    if(!s.filled) continue;
+    const c = cards.find(z=>z.id===s.id);
+    drawCardBox(c, true);
+    // เครื่องหมายถูก
+    ctx.save(); ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.font = `${Math.min(s.w,s.h)*0.22}px ${EMOJI_FONT}`;
+    ctx.fillText('✅', s.x+s.w-22, s.y+22);
+    ctx.restore();
+  }
+  // การ์ดที่ยังลอยอยู่
+  for(const c of cards){
+    if(c.placed || c===grabbed) continue;
+    drawCardBox(c, false, c===hoverCard);
+  }
+  // การ์ดที่กำลังถือ วาดบนสุด
+  if(grabbed) drawCardBox(grabbed, false, true, true);
+}
+
+function drawCardBox(c, placed, hover=false, held=false){
+  ctx.save();
+  const lift = held?1.08 : (hover?1.05:1);
+  const w=c.w*lift, h=c.h*lift, x=c.x-(w-c.w)/2, y=c.y-(h-c.h)/2;
+  ctx.shadowColor='rgba(0,0,0,.35)'; ctx.shadowBlur=held?22:10; ctx.shadowOffsetY=held?10:5;
+  roundRect(x,y,w,h,16);
+  ctx.fillStyle = placed ? 'rgba(255,255,255,.92)' : c.color;
+  ctx.fill();
+  if(hover && !placed){ ctx.shadowColor='#fde047'; ctx.shadowBlur=28; ctx.shadowOffsetY=0; }
+  else { ctx.shadowColor='transparent'; }
+  ctx.lineWidth = hover?6:2.5;
+  ctx.strokeStyle = hover ? '#fde047' : 'rgba(255,255,255,.7)';
+  ctx.stroke();
+  ctx.shadowColor='transparent';
+  // ข้อความ
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  const fs = fitFont(c.text, w*0.84, h*0.5);
+  ctx.font = `700 ${fs}px 'Mali',sans-serif`;
+  ctx.fillStyle = placed ? '#1e293b' : '#fff';
+  ctx.fillText(c.text, x+w/2, y+h/2);
+  ctx.restore();
+}
+
+function drawCursor(x,y,color){
+  ctx.save();
+  ctx.beginPath(); ctx.arc(x,y,20,0,Math.PI*2);
+  ctx.fillStyle='rgba(0,0,0,.18)'; ctx.fill();
+  ctx.beginPath(); ctx.arc(x,y,16,0,Math.PI*2);
+  ctx.strokeStyle=color; ctx.lineWidth=5; ctx.stroke();
+  ctx.beginPath(); ctx.arc(x,y,5,0,Math.PI*2);
+  ctx.fillStyle=color; ctx.fill();
+  ctx.restore();
+}
+function cursorColor(p,down){
+  if(wrongTimer>0) return CURSOR.red;
+  if(grabbed) return CURSOR.green;
+  if(hoverCard) return CURSOR.yellow;
+  return CURSOR.blue;
+}
+
+const HAND_CONN=[[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
+function drawHand(lm){
+  ctx.save();
+  ctx.strokeStyle='rgba(255,255,255,.5)'; ctx.lineWidth=3;
+  for(const [a,b] of HAND_CONN){
+    ctx.beginPath();
+    ctx.moveTo((1-lm[a].x)*cssW, lm[a].y*cssH);
+    ctx.lineTo((1-lm[b].x)*cssW, lm[b].y*cssH);
+    ctx.stroke();
+  }
+  ctx.fillStyle='rgba(255,255,255,.85)';
+  for(const k of lm){ ctx.beginPath(); ctx.arc((1-k.x)*cssW,k.y*cssH,3.2,0,Math.PI*2); ctx.fill(); }
+  ctx.restore();
+}
+
+/* ============================================================
+   อินพุต: เมาส์ / สัมผัส
+============================================================ */
+function ptFromEvent(e){
+  const r=canvas.getBoundingClientRect();
+  const src = (e.touches&&e.touches[0])||(e.changedTouches&&e.changedTouches[0])||e;
+  return { x:src.clientX-r.left, y:src.clientY-r.top };
+}
+canvas.addEventListener('mousemove', e=>{ const p=ptFromEvent(e); mouse.x=p.x; mouse.y=p.y; mouse.has=true; });
+canvas.addEventListener('mousedown', e=>{ const p=ptFromEvent(e); mouse.x=p.x; mouse.y=p.y; mouse.down=true; mouse.has=true; ensureAudio(); });
+window.addEventListener('mouseup', ()=>{ mouse.down=false; });
+canvas.addEventListener('touchstart', e=>{ e.preventDefault(); const p=ptFromEvent(e); mouse.x=p.x; mouse.y=p.y; mouse.down=true; mouse.has=true; hand.seen=false; hand.t=0; ensureAudio(); }, {passive:false});
+canvas.addEventListener('touchmove', e=>{ e.preventDefault(); const p=ptFromEvent(e); mouse.x=p.x; mouse.y=p.y; }, {passive:false});
+canvas.addEventListener('touchend', e=>{ e.preventDefault(); mouse.down=false; }, {passive:false});
+
+/* ============================================================
+   กล้อง + MediaPipe Hands
+============================================================ */
+function onResults(res){
+  const list = res.multiHandLandmarks;
+  if(list && list.length>0){
+    const lm = list[0];
+    const tip = lm[8], thumb = lm[4];
+    // เคอร์เซอร์ = จุดกึ่งกลางปลายนิ้วชี้+นิ้วโป้ง (จุดหนีบ) นิ่งกว่าใช้ปลายนิ้วเดียว
+    const ax = (tip.x+thumb.x)/2, ay = (tip.y+thumb.y)/2;
+    const rawX = (1-ax)*cssW, rawY = ay*cssH;
+    // ปรับ pinch ตามขนาดฝ่ามือ → ไม่ขึ้นกับระยะห่างจากกล้อง
+    const palm = Math.hypot(lm[0].x-lm[9].x, lm[0].y-lm[9].y) || 1e-4;
+    const ratio = Math.hypot(thumb.x-tip.x, thumb.y-tip.y) / palm;
+    hand.ratio += (ratio - hand.ratio)*0.5;                          // กรอง ratio
+    if(hand.pinch){ if(hand.ratio > PINCH_OPEN)  hand.pinch=false; }  // hysteresis กันสั่น
+    else          { if(hand.ratio < PINCH_CLOSE) hand.pinch=true;  }
+    // กรองตำแหน่งแบบปรับตัว: ขยับนิด=กรองหนัก (นิ่ง) / ขยับมาก=ตอบไว
+    if(hand.sx===null){ hand.sx=rawX; hand.sy=rawY; }
+    const d = Math.hypot(rawX-hand.sx, rawY-hand.sy);
+    const a = clamp(d/(d+SMOOTH_K), 0.12, 0.9);
+    hand.sx += (rawX-hand.sx)*a;  hand.sy += (rawY-hand.sy)*a;
+    hand.x = hand.sx; hand.y = hand.sy;
+    hand.lm = lm; hand.seen = true; hand.t = performance.now();
+  } else {
+    hand.seen = false; hand.lm = null;
+  }
+}
+async function startCamera(){
+  if(camStarted) return;
+  if(typeof Hands==='undefined' || typeof Camera==='undefined'){ camFailed=true; setModeUI(); return; }
+  try{
+    handsObj = new Hands({ locateFile:(f)=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+    handsObj.setOptions({ maxNumHands:1, modelComplexity:0, minDetectionConfidence:0.6, minTrackingConfidence:0.5 });
+    handsObj.onResults(onResults);
+    camObj = new Camera(video, { onFrame: async()=>{ try{ await handsObj.send({image:video}); }catch(e){} }, width:640, height:480 });
+    await camObj.start();
+    camStarted = true; camFailed = false;
+    video.classList.add('on');
+    setModeUI();
+  }catch(err){
+    camFailed = true; useCamera = false; hand.seen=false;
+    video.classList.remove('on');
+    setModeUI();
+    toast('ใช้กล้องไม่ได้ — เล่นด้วยเมาส์/นิ้วได้เลย 🖱️');
+  }
+}
+function setModeUI(){
+  const btn=document.getElementById('modeBtn');
+  if(camFailed){ btn.textContent='🖱️ โหมดเมาส์ (กล้องไม่พร้อม)'; return; }
+  btn.textContent = useCamera ? '📷 โหมดกล้อง (แตะเพื่อปิด)' : '🖱️ โหมดเมาส์ (แตะเพื่อเปิดกล้อง)';
+}
+document.getElementById('modeBtn').addEventListener('click', async ()=>{
+  if(camFailed){ camFailed=false; useCamera=true; await startCamera(); return; }
+  useCamera = !useCamera;
+  if(useCamera){ video.classList.add('on'); await startCamera(); }
+  else { useCamera=false; hand.seen=false; hand.t=0; video.classList.remove('on'); }
+  setModeUI();
+});
+
+/* ============================================================
+   การสลับหน้าจอ
+============================================================ */
+function show(id){
+  ['startScreen','howtoScreen','subjectScreen','winScreen'].forEach(s=>document.getElementById(s).classList.add('hidden'));
+  if(id) document.getElementById(id).classList.remove('hidden');
+}
+function hexA(h,a){ const n=parseInt(h.slice(1),16); return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`; }
+function renderSubjectMenu(){
+  const grid=document.getElementById('subjectGrid'); grid.innerHTML='';
+  SUBJECTS.forEach(s=>{
+    const b=document.createElement('button');
+    b.className='btn glass';
+    b.style.cssText='padding:22px 16px;border-radius:22px;color:#fff;text-align:center;cursor:pointer;background:'+hexA(s.color,.30)+';border:2px solid '+hexA(s.color,.85)+';';
+    b.innerHTML='<div style="font-size:46px;line-height:1;">'+s.icon+'</div>'+
+                '<div style="font-size:24px;font-weight:700;margin-top:8px;">'+s.name+'</div>'+
+                '<div style="font-size:15px;opacity:.92;margin-top:4px;">'+s.tip+'</div>'+
+                '<div style="font-size:14px;opacity:.85;margin-top:6px;">📦 คลัง 50 ข้อ</div>';
+    b.addEventListener('click', ()=>{ ensureAudio(); show(null); if(useCamera) startCamera(); setModeUI(); startSubject(s); });
+    grid.appendChild(b);
+  });
+}
+document.getElementById('toHowto').addEventListener('click', ()=>{ ensureAudio(); show('howtoScreen'); });
+document.getElementById('toSubjects').addEventListener('click', ()=>{ ensureAudio(); renderSubjectMenu(); show('subjectScreen'); });
+document.getElementById('replay').addEventListener('click', ()=>{ show(null); if(useCamera) startCamera(); startSubject(currentSubject); });
+document.getElementById('toMenu').addEventListener('click', ()=>{ document.getElementById('hud').classList.add('hidden'); renderSubjectMenu(); show('subjectScreen'); });
+
+/* ---------- เริ่มระบบ ---------- */
+function boot(){
+  resizeCanvas();
+  mouse.x=cssW/2; mouse.y=cssH/2;
+  // รอฟอนต์ก่อนวาดตัวอักษร (กันตัวอักษรเพี้ยน)
+  if(document.fonts && document.fonts.ready){ document.fonts.ready.then(()=>{}); }
+  requestAnimationFrame(draw);
+}
+boot();
+</script>
+</body>
+</html>

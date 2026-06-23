@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>เขียนตามเส้นประ ก–ฮ (AR)</title>
+
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Mali:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+
+<style>
+  :root{ --glass:rgba(255,255,255,.16); --glass-bd:rgba(255,255,255,.35); }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body{ margin:0; height:100%; font-family:'Mali',system-ui,sans-serif; overflow:hidden; }
+  body{ background:linear-gradient(135deg,#0f766e 0%,#0891b2 45%,#2563eb 100%); color:#fff; }
+  #stage{ position:fixed; inset:0; overflow:hidden; }
+  #cam{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; transform:scaleX(-1); opacity:0; transition:opacity .4s; }
+  #cam.on{ opacity:.5; }
+  #board{ position:absolute; inset:0; width:100%; height:100%; z-index:2; touch-action:none; }
+  .glass{ background:var(--glass); border:1px solid var(--glass-bd); border-radius:26px; backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px); box-shadow:0 12px 40px rgba(0,0,0,.28); }
+  .btn{ font-family:inherit; font-weight:700; cursor:pointer; border:none; transition:transform .12s, filter .12s; box-shadow:0 8px 22px rgba(0,0,0,.28); }
+  .btn:hover{ transform:translateY(-3px) scale(1.03); filter:brightness(1.06); }
+  .btn:active{ transform:translateY(0) scale(.98); }
+  .screen{ position:absolute; inset:0; z-index:5; display:flex; align-items:center; justify-content:center; padding:20px; }
+  .hidden{ display:none !important; }
+  .pop{ animation:pop .4s cubic-bezier(.2,1.4,.4,1) both; }
+  @keyframes pop{ from{ transform:scale(.7); opacity:0 } to{ transform:scale(1); opacity:1 } }
+  .float{ animation:float 3s ease-in-out infinite; }
+  @keyframes float{ 0%,100%{ transform:translateY(0) } 50%{ transform:translateY(-10px) } }
+  #toast{ position:absolute; left:50%; top:13%; transform:translateX(-50%) translateY(-10px); z-index:8; padding:14px 28px; border-radius:999px; font-size:24px; font-weight:700; background:rgba(0,0,0,.45); border:1px solid var(--glass-bd); opacity:0; transition:opacity .25s, transform .25s; pointer-events:none; white-space:nowrap; }
+  #toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+  #banner{ position:absolute; inset:0; z-index:7; display:flex; align-items:center; justify-content:center; pointer-events:none; opacity:0; transition:opacity .3s; }
+  #banner.show{ opacity:1; }
+  .pill{ padding:8px 16px; border-radius:999px; font-weight:700; }
+  .lbtn{ display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; padding:10px 4px; border-radius:16px; color:#fff; background:rgba(255,255,255,.14); border:1px solid var(--glass-bd); cursor:pointer; }
+  .lbtn:hover{ background:rgba(255,255,255,.28); }
+  .lbtn .c{ font-size:34px; line-height:1; font-weight:700; }
+  .lbtn .n{ font-size:12px; opacity:.9; }
+  .lbtn.done{ background:rgba(74,222,128,.30); border-color:rgba(74,222,128,.9); }
+</style>
+</head>
+<body>
+<div id="stage">
+  <video id="cam" playsinline muted></video>
+  <canvas id="board"></canvas>
+
+  <!-- HUD ระหว่างเล่น -->
+  <div id="gameUI" class="hidden" style="position:absolute;inset:0;z-index:4;pointer-events:none;">
+    <div style="position:absolute;top:12px;left:12px;right:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+      <div class="glass pill" style="font-size:22px;">✏️ <span id="lname">ก ไก่</span></div>
+      <div class="glass pill" style="font-size:18px;display:flex;align-items:center;gap:8px;">
+        <span>คืบหน้า</span>
+        <span style="display:inline-block;width:120px;height:12px;border-radius:999px;background:rgba(255,255,255,.25);overflow:hidden;">
+          <span id="progbar" style="display:block;height:100%;width:0%;background:#fde047;transition:width .1s;"></span>
+        </span>
+        <span id="prog">0%</span>
+      </div>
+      <div class="glass pill" style="font-size:18px;">เขียนได้: <span id="doneCount">0</span>/44</div>
+      <div style="flex:1"></div>
+      <button id="modeBtn" class="btn glass pill" style="font-size:16px;color:#fff;background:rgba(255,255,255,.18);pointer-events:auto;">📷 โหมดกล้อง</button>
+    </div>
+    <div style="position:absolute;left:50%;bottom:14px;transform:translateX(-50%);display:flex;gap:10px;pointer-events:auto;flex-wrap:wrap;justify-content:center;">
+      <button id="btnPrev" class="btn glass pill" style="font-size:18px;color:#fff;background:rgba(255,255,255,.16);">◀ ก่อนหน้า</button>
+      <button id="btnReset" class="btn glass pill" style="font-size:18px;color:#fff;background:rgba(255,255,255,.16);">🔄 เริ่มใหม่</button>
+      <button id="btnMenu" class="btn glass pill" style="font-size:18px;color:#fff;background:rgba(255,255,255,.16);">📋 เมนู</button>
+      <button id="btnNext" class="btn glass pill" style="font-size:18px;color:#fff;background:rgba(255,255,255,.16);">ถัดไป ▶</button>
+    </div>
+  </div>
+
+  <div id="toast"></div>
+  <div id="banner"><div class="glass pop" style="padding:28px 46px;font-size:42px;font-weight:700;text-align:center;" id="bannerText"></div></div>
+
+  <!-- หน้าเริ่มต้น -->
+  <div id="startScreen" class="screen">
+    <div class="glass float" style="max-width:680px;width:100%;padding:44px 36px;text-align:center;">
+      <div style="font-size:72px;line-height:1;">✏️ ก ✍️</div>
+      <h1 style="font-size:40px;margin:14px 0 6px;font-weight:700;">เขียนตามเส้นประ ก–ฮ</h1>
+      <p style="font-size:22px;margin:0 0 6px;">ฝึกเขียนพยัญชนะไทย 44 ตัว ด้วยปลายนิ้ว (AR)</p>
+      <p style="font-size:18px;opacity:.9;margin:0 0 26px;">ใช้มือผ่านกล้อง หรือใช้เมาส์/นิ้วก็เล่นได้!</p>
+      <button id="toHowto" class="btn" style="font-size:30px;padding:18px 48px;border-radius:999px;background:#fde047;color:#7c2d12;">เข้าสู่เกม ▶</button>
+    </div>
+  </div>
+
+  <!-- หน้าวิธีเล่น -->
+  <div id="howtoScreen" class="screen hidden">
+    <div class="glass pop" style="max-width:720px;width:100%;padding:40px 34px;text-align:center;">
+      <h2 style="font-size:32px;margin:0 0 20px;font-weight:700;">วิธีเล่น ✍️</h2>
+      <div style="display:flex;flex-direction:column;gap:14px;font-size:22px;text-align:left;max-width:560px;margin:0 auto;">
+        <div class="glass" style="padding:14px 20px;border-radius:18px;">☝️ <b>ใช้นิ้วชี้</b> เป็นปากกา ชี้ไปที่ตัวอักษรแล้ว <b>ลากตามจุดเส้นประ</b></div>
+        <div class="glass" style="padding:14px 20px;border-radius:18px;">🖱️ <b>หรือใช้เมาส์/นิ้วบนจอ</b> กดค้างแล้วลากตามเส้น</div>
+        <div class="glass" style="padding:14px 20px;border-radius:18px;">✨ จุดจะเปลี่ยนเป็น <b>สีทอง</b> เมื่อเขียนผ่าน เขียนให้ครบทั้งตัว</div>
+        <div class="glass" style="padding:14px 20px;border-radius:18px;">⭐ เขียนครบ = ผ่าน! ไปตัวต่อไปอัตโนมัติ</div>
+      </div>
+      <button id="toMenu2" class="btn" style="margin-top:24px;font-size:28px;padding:16px 46px;border-radius:999px;background:#4ade80;color:#064e3b;">เลือกตัวอักษร →</button>
+    </div>
+  </div>
+
+  <!-- หน้าเลือกตัวอักษร -->
+  <div id="menuScreen" class="screen hidden">
+    <div class="glass pop" style="max-width:900px;width:100%;padding:26px 22px;text-align:center;display:flex;flex-direction:column;max-height:90vh;">
+      <h2 style="font-size:30px;margin:0 0 4px;font-weight:700;">เลือกตัวอักษรที่อยากเขียน</h2>
+      <p style="font-size:16px;opacity:.9;margin:0 0 14px;">แตะตัวอักษร หรือเริ่มเรียงจาก ก</p>
+      <div style="margin-bottom:14px;">
+        <button id="btnSeq" class="btn" style="font-size:20px;padding:12px 30px;border-radius:999px;background:#fde047;color:#7c2d12;">▶ เริ่มจาก ก ไก่</button>
+      </div>
+      <div id="menuGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:10px;overflow:auto;padding:4px;"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   พยัญชนะไทย 44 ตัว [อักษร, ชื่อ]
+============================================================ */
+const LETTERS = [
+  ['ก','ก ไก่'],['ข','ข ไข่'],['ฃ','ฃ ขวด'],['ค','ค ควาย'],['ฅ','ฅ คน'],['ฆ','ฆ ระฆัง'],
+  ['ง','ง งู'],['จ','จ จาน'],['ฉ','ฉ ฉิ่ง'],['ช','ช ช้าง'],['ซ','ซ โซ่'],['ฌ','ฌ เฌอ'],
+  ['ญ','ญ หญิง'],['ฎ','ฎ ชฎา'],['ฏ','ฏ ปฏัก'],['ฐ','ฐ ฐาน'],['ฑ','ฑ มณโฑ'],['ฒ','ฒ ผู้เฒ่า'],
+  ['ณ','ณ เณร'],['ด','ด เด็ก'],['ต','ต เต่า'],['ถ','ถ ถุง'],['ท','ท ทหาร'],['ธ','ธ ธง'],
+  ['น','น หนู'],['บ','บ ใบไม้'],['ป','ป ปลา'],['ผ','ผ ผึ้ง'],['ฝ','ฝ ฝา'],['พ','พ พาน'],
+  ['ฟ','ฟ ฟัน'],['ภ','ภ สำเภา'],['ม','ม ม้า'],['ย','ย ยักษ์'],['ร','ร เรือ'],['ล','ล ลิง'],
+  ['ว','ว แหวน'],['ศ','ศ ศาลา'],['ษ','ษ ฤๅษี'],['ส','ส เสือ'],['ห','ห หีบ'],['ฬ','ฬ จุฬา'],
+  ['อ','อ อ่าง'],['ฮ','ฮ นกฮูก'],
+];
+const COVER_TH = 1.00;       // ต้องระบายจุดให้ครบทุกจุด (100%) ถึงจะผ่าน
+const CURSOR = { idle:'#38bdf8', ink:'#4ade80' };
+
+/* ---------- ตัวแปรหลัก ---------- */
+const stage=document.getElementById('stage');
+const canvas=document.getElementById('board');
+const ctx=canvas.getContext('2d');
+const video=document.getElementById('cam');
+const mctx=document.createElement('canvas').getContext('2d');   // offscreen สำหรับสร้าง mask ตัวอักษร
+
+let cssW=0, cssH=0;
+let state='menu';             // menu | play
+let letterIdx=0;
+let cells=[], total=0, coveredCount=0, complete=false;
+let box={x:0,y:0,s:0}, glyphFont=10;
+let inkTrail=[];
+const doneSet=new Set();
+let lastT=performance.now();
+
+const mouse={ x:0,y:0, down:false };
+const hand ={ seen:false, t:0, x:0, y:0, sx:null, sy:null, lm:null };
+const SMOOTH_K=22, HAND_GRACE=260;
+let useCamera=true, camStarted=false, camFailed=false, camObj=null, handsObj=null;
+let penR=24;
+
+/* ---------- เสียง ---------- */
+let actx=null;
+function ensureAudio(){ if(!actx){ try{ actx=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} } if(actx&&actx.state==='suspended') actx.resume(); }
+function tone(f,d,t='sine',w=0,g=0.16){ if(!actx) return; const o=actx.createOscillator(),gn=actx.createGain(); o.type=t; o.frequency.value=f; const t0=actx.currentTime+w; gn.gain.setValueAtTime(0.0001,t0); gn.gain.exponentialRampToValueAtTime(g,t0+0.02); gn.gain.exponentialRampToValueAtTime(0.0001,t0+d); o.connect(gn).connect(actx.destination); o.start(t0); o.stop(t0+d+0.02); }
+const sndTick=()=>{ ensureAudio(); tone(880,0.05,'sine',0,0.06); };
+const sndWin =()=>{ ensureAudio(); [523,659,784,1047].forEach((f,i)=>tone(f,0.18,'sine',i*0.1)); };
+
+/* ---------- canvas ---------- */
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+function resizeCanvas(){
+  const r=stage.getBoundingClientRect(); cssW=r.width; cssH=r.height;
+  const dpr=Math.min(window.devicePixelRatio||1,2);
+  canvas.width=Math.round(cssW*dpr); canvas.height=Math.round(cssH*dpr);
+  canvas.style.width=cssW+'px'; canvas.style.height=cssH+'px';
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+}
+window.addEventListener('resize',()=>{ resizeCanvas(); if(state==='play') buildLetter(letterIdx,true); });
+
+/* ---------- สร้างกล่อง + จุดเส้นประจากฟอนต์ ---------- */
+function computeBox(){
+  const topPad=84, botPad=104;
+  const availH=cssH-topPad-botPad;
+  const s=clamp(Math.min(cssW*0.86, availH), 220, 560);
+  box={ s, x:(cssW-s)/2, y: topPad+(availH-s)/2 };
+  glyphFont=s*0.62;
+}
+function buildLetter(i,preserve=false){
+  letterIdx=(i+LETTERS.length)%LETTERS.length;
+  computeBox();
+  const ch=LETTERS[letterIdx][0];
+  // วาด glyph ลง offscreen เพื่อหาพิกเซลที่เป็นตัวอักษร
+  const S=Math.round(box.s);
+  const off=mctx.canvas; off.width=S; off.height=S;
+  mctx.clearRect(0,0,S,S);
+  mctx.fillStyle='#000'; mctx.textAlign='center'; mctx.textBaseline='middle';
+  mctx.font=`700 ${Math.round(glyphFont)}px 'Mali',sans-serif`;
+  mctx.fillText(ch, S/2, S/2);
+  const data=mctx.getImageData(0,0,S,S).data;
+  const step=Math.round(clamp(box.s/24,12,22));
+  const prevCovered = preserve ? cells.filter(c=>c.on).map(c=>c.gx+'_'+c.gy) : null;
+  cells=[];
+  for(let gy=Math.floor(step/2); gy<S; gy+=step){
+    for(let gx=Math.floor(step/2); gx<S; gx+=step){
+      const a=data[(gy*S+gx)*4+3];
+      if(a>110){
+        const on = preserve ? prevCovered.includes(gx+'_'+gy) : false;
+        cells.push({ x:box.x+gx, y:box.y+gy, gx, gy, on });
+      }
+    }
+  }
+  total=cells.length;
+  coveredCount=cells.filter(c=>c.on).length;
+  complete = total>0 && coveredCount/total>=COVER_TH;
+  inkTrail=[];
+  penR=clamp(step*1.6,16,38);
+  document.getElementById('lname').textContent=LETTERS[letterIdx][1];
+  updateProgress();
+}
+
+function updateProgress(){
+  const cov= total? coveredCount/total : 0;
+  document.getElementById('prog').textContent=Math.round(cov*100)+'%';
+  document.getElementById('progbar').style.width=Math.min(100,Math.round(cov*100))+'%';
+  document.getElementById('doneCount').textContent=doneSet.size;
+}
+
+/* ---------- เริ่ม / เปลี่ยนตัว ---------- */
+function startLetter(i){ buildLetter(i,false); state='play'; document.getElementById('gameUI').classList.remove('hidden'); }
+function nextLetter(){ if(letterIdx<LETTERS.length-1) startLetter(letterIdx+1); else toast('เขียนครบทุกตัวแล้ว! 🎉'); }
+function prevLetter(){ startLetter(letterIdx-1); }
+function resetLetter(){ cells.forEach(c=>c.on=false); coveredCount=0; complete=false; inkTrail=[]; updateProgress(); }
+
+let advanceTimer=null;
+function onLetterDone(){
+  if(complete) return;
+  complete=true; doneSet.add(letterIdx); sndWin(); updateProgress();
+  banner('เก่งมาก! เขียน "'+LETTERS[letterIdx][0]+'" ได้แล้ว ⭐');
+  clearTimeout(advanceTimer);
+  advanceTimer=setTimeout(()=>{ hideBanner(); if(letterIdx<LETTERS.length-1) startLetter(letterIdx+1); else { toMenu(); } }, 1700);
+}
+
+/* ---------- Toast / Banner ---------- */
+let toastTimer=null;
+function toast(m){ const t=document.getElementById('toast'); t.textContent=m; t.classList.add('show'); clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove('show'),1200); }
+function banner(m){ document.getElementById('bannerText').textContent=m; document.getElementById('banner').classList.add('show'); }
+function hideBanner(){ document.getElementById('banner').classList.remove('show'); }
+
+/* ============================================================
+   DRAW LOOP
+============================================================ */
+function draw(now){
+  lastT=now;
+  ctx.clearRect(0,0,cssW,cssH);
+  if(state==='play'){
+    const handFresh=(now-hand.t)<HAND_GRACE;
+    const penOn = handFresh ? true : mouse.down;
+    const px = handFresh ? hand.x : mouse.x;
+    const py = handFresh ? hand.y : mouse.y;
+
+    if(penOn && !complete){
+      // ลงหมึก: ทำให้จุดใกล้ ๆ ติดสีทอง
+      let newly=0;
+      for(const c of cells){ if(!c.on){ const dx=c.x-px, dy=c.y-py; if(dx*dx+dy*dy < penR*penR){ c.on=true; coveredCount++; newly++; } } }
+      if(newly>0){ updateProgress(); if(coveredCount%14===0) sndTick(); }
+      inkTrail.push({x:px,y:py,t:now});
+      const cov= total? coveredCount/total:0;
+      if(cov>=COVER_TH) onLetterDone();
+    }
+    // ตัดหางหมึกที่เก่า
+    while(inkTrail.length && now-inkTrail[0].t>500) inkTrail.shift();
+
+    drawGhost();
+    drawDots();
+    drawTrail();
+    if(handFresh && hand.lm) drawHand(hand.lm);
+    drawPen(px,py, (penOn? CURSOR.ink:CURSOR.idle), penOn);
+  }
+  requestAnimationFrame(draw);
+}
+
+function drawGhost(){
+  const ch=LETTERS[letterIdx][0];
+  ctx.save();
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.font=`700 ${Math.round(glyphFont)}px 'Mali',sans-serif`;
+  ctx.fillStyle='rgba(255,255,255,.12)';
+  ctx.fillText(ch, box.x+box.s/2, box.y+box.s/2);
+  ctx.restore();
+}
+function drawDots(){
+  for(const c of cells){
+    ctx.beginPath();
+    if(c.on){
+      ctx.arc(c.x,c.y,5.5,0,Math.PI*2);
+      ctx.fillStyle='#fde047'; ctx.shadowColor='#fde047'; ctx.shadowBlur=8; ctx.fill(); ctx.shadowBlur=0;
+    }else{
+      ctx.arc(c.x,c.y,3.4,0,Math.PI*2);
+      ctx.strokeStyle='rgba(255,255,255,.7)'; ctx.lineWidth=2; ctx.stroke();
+    }
+  }
+}
+function drawTrail(){
+  if(inkTrail.length<2) return;
+  ctx.save(); ctx.lineCap='round'; ctx.lineJoin='round';
+  ctx.strokeStyle='rgba(253,224,71,.55)'; ctx.lineWidth=10;
+  for(let i=1;i<inkTrail.length;i++){
+    const a=inkTrail[i-1], b=inkTrail[i];
+    ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
+  }
+  ctx.restore();
+}
+function drawPen(x,y,color,ink){
+  ctx.save();
+  ctx.beginPath(); ctx.arc(x,y,penR,0,Math.PI*2); ctx.strokeStyle='rgba(255,255,255,.25)'; ctx.lineWidth=2; ctx.stroke();
+  ctx.beginPath(); ctx.arc(x,y,14,0,Math.PI*2); ctx.strokeStyle=color; ctx.lineWidth=5; ctx.stroke();
+  ctx.beginPath(); ctx.arc(x,y,ink?7:5,0,Math.PI*2); ctx.fillStyle=color; ctx.fill();
+  ctx.restore();
+}
+const HAND_CONN=[[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
+function drawHand(lm){
+  ctx.save(); ctx.strokeStyle='rgba(255,255,255,.4)'; ctx.lineWidth=3;
+  for(const [a,b] of HAND_CONN){ ctx.beginPath(); ctx.moveTo((1-lm[a].x)*cssW,lm[a].y*cssH); ctx.lineTo((1-lm[b].x)*cssW,lm[b].y*cssH); ctx.stroke(); }
+  ctx.fillStyle='rgba(255,255,255,.8)';
+  for(const k of lm){ ctx.beginPath(); ctx.arc((1-k.x)*cssW,k.y*cssH,3,0,Math.PI*2); ctx.fill(); }
+  ctx.restore();
+}
+
+/* ============================================================
+   อินพุต เมาส์/สัมผัส
+============================================================ */
+function pt(e){ const r=canvas.getBoundingClientRect(); const s=(e.touches&&e.touches[0])||(e.changedTouches&&e.changedTouches[0])||e; return {x:s.clientX-r.left,y:s.clientY-r.top}; }
+canvas.addEventListener('mousemove',e=>{ const p=pt(e); mouse.x=p.x; mouse.y=p.y; });
+canvas.addEventListener('mousedown',e=>{ const p=pt(e); mouse.x=p.x; mouse.y=p.y; mouse.down=true; ensureAudio(); });
+window.addEventListener('mouseup',()=>{ mouse.down=false; });
+canvas.addEventListener('touchstart',e=>{ e.preventDefault(); const p=pt(e); mouse.x=p.x; mouse.y=p.y; mouse.down=true; hand.seen=false; hand.t=0; ensureAudio(); },{passive:false});
+canvas.addEventListener('touchmove',e=>{ e.preventDefault(); const p=pt(e); mouse.x=p.x; mouse.y=p.y; },{passive:false});
+canvas.addEventListener('touchend',e=>{ e.preventDefault(); mouse.down=false; },{passive:false});
+
+/* ============================================================
+   กล้อง + MediaPipe Hands (ปลายนิ้วชี้ = ปากกา)
+============================================================ */
+function onResults(res){
+  const list=res.multiHandLandmarks;
+  if(list && list.length>0){
+    const lm=list[0]; const tip=lm[8];
+    const rawX=(1-tip.x)*cssW, rawY=tip.y*cssH;
+    if(hand.sx===null){ hand.sx=rawX; hand.sy=rawY; }
+    const d=Math.hypot(rawX-hand.sx, rawY-hand.sy);
+    const a=clamp(d/(d+SMOOTH_K),0.12,0.9);
+    hand.sx+=(rawX-hand.sx)*a; hand.sy+=(rawY-hand.sy)*a;
+    hand.x=hand.sx; hand.y=hand.sy; hand.lm=lm; hand.seen=true; hand.t=performance.now();
+  } else { hand.seen=false; hand.lm=null; }
+}
+async function startCamera(){
+  if(camStarted) return;
+  if(typeof Hands==='undefined'||typeof Camera==='undefined'){ camFailed=true; setModeUI(); return; }
+  try{
+    handsObj=new Hands({ locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+    handsObj.setOptions({ maxNumHands:1, modelComplexity:0, minDetectionConfidence:0.6, minTrackingConfidence:0.5 });
+    handsObj.onResults(onResults);
+    camObj=new Camera(video,{ onFrame:async()=>{ try{ await handsObj.send({image:video}); }catch(e){} }, width:640, height:480 });
+    await camObj.start(); camStarted=true; camFailed=false; video.classList.add('on'); setModeUI();
+  }catch(err){ camFailed=true; useCamera=false; hand.seen=false; video.classList.remove('on'); setModeUI(); toast('ใช้กล้องไม่ได้ — เขียนด้วยเมาส์/นิ้วได้เลย 🖱️'); }
+}
+function setModeUI(){ const b=document.getElementById('modeBtn'); if(camFailed){ b.textContent='🖱️ โหมดเมาส์ (กล้องไม่พร้อม)'; return; } b.textContent=useCamera?'📷 โหมดกล้อง (แตะเพื่อปิด)':'🖱️ โหมดเมาส์ (แตะเพื่อเปิดกล้อง)'; }
+document.getElementById('modeBtn').addEventListener('click',async()=>{
+  if(camFailed){ camFailed=false; useCamera=true; await startCamera(); return; }
+  useCamera=!useCamera;
+  if(useCamera){ video.classList.add('on'); await startCamera(); } else { useCamera=false; hand.seen=false; hand.t=0; video.classList.remove('on'); }
+  setModeUI();
+});
+
+/* ============================================================
+   สลับหน้าจอ + เมนูตัวอักษร
+============================================================ */
+function show(id){ ['startScreen','howtoScreen','menuScreen'].forEach(s=>document.getElementById(s).classList.add('hidden')); if(id) document.getElementById(id).classList.remove('hidden'); }
+function renderLetterMenu(){
+  const g=document.getElementById('menuGrid'); g.innerHTML='';
+  LETTERS.forEach((L,i)=>{
+    const b=document.createElement('button'); b.className='lbtn btn'+(doneSet.has(i)?' done':'');
+    b.innerHTML='<div class="c">'+L[0]+'</div><div class="n">'+L[1].split(' ')[1]+(doneSet.has(i)?' ✓':'')+'</div>';
+    b.addEventListener('click',()=>{ ensureAudio(); show(null); if(useCamera) startCamera(); setModeUI(); startLetter(i); });
+    g.appendChild(b);
+  });
+}
+function toMenu(){ state='menu'; document.getElementById('gameUI').classList.add('hidden'); renderLetterMenu(); show('menuScreen'); }
+
+document.getElementById('toHowto').addEventListener('click',()=>{ ensureAudio(); show('howtoScreen'); });
+document.getElementById('toMenu2').addEventListener('click',()=>{ ensureAudio(); renderLetterMenu(); show('menuScreen'); });
+document.getElementById('btnSeq').addEventListener('click',()=>{ ensureAudio(); show(null); if(useCamera) startCamera(); setModeUI(); startLetter(0); });
+document.getElementById('btnPrev').addEventListener('click',prevLetter);
+document.getElementById('btnNext').addEventListener('click',nextLetter);
+document.getElementById('btnReset').addEventListener('click',resetLetter);
+document.getElementById('btnMenu').addEventListener('click',toMenu);
+
+/* ---------- เริ่มระบบ ---------- */
+function boot(){ resizeCanvas(); mouse.x=cssW/2; mouse.y=cssH/2; requestAnimationFrame(draw); }
+boot();
+</script>
+</body>
+</html>

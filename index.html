@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>เกมการเรียนรู้ ป.1 (AR)</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Mali:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; min-height:100%; font-family:'Mali',system-ui,sans-serif; color:#fff; }
+  body{ min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px;
+        background:linear-gradient(135deg,#6d28d9 0%,#2563eb 50%,#0891b2 100%); }
+  .glass{ background:rgba(255,255,255,.16); border:1px solid rgba(255,255,255,.35); border-radius:28px;
+          backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px); box-shadow:0 12px 40px rgba(0,0,0,.28); }
+  .card{ display:flex; flex-direction:column; text-decoration:none; color:#fff; padding:30px 24px; text-align:center;
+         transition:transform .15s, filter .15s; }
+  .card:hover{ transform:translateY(-6px) scale(1.02); filter:brightness(1.07); }
+  .play{ margin-top:18px; font-weight:700; font-size:22px; padding:12px 0; border-radius:999px; }
+</style>
+</head>
+<body>
+  <div style="max-width:920px;width:100%;">
+    <div class="glass" style="padding:36px 30px;text-align:center;margin-bottom:24px;">
+      <div style="font-size:64px;line-height:1;">🎮 ✏️ ➕</div>
+      <h1 style="font-size:40px;margin:14px 0 6px;font-weight:700;">เกมการเรียนรู้ ป.1 (AR)</h1>
+      <p style="font-size:20px;opacity:.92;margin:0;">เลือกเกมที่อยากเล่น — ใช้มือผ่านกล้อง หรือเมาส์/นิ้วก็ได้</p>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:22px;">
+
+      <a class="glass card" href="p1-ar.html">
+        <div style="font-size:74px;line-height:1;">🔤➕➖</div>
+        <h2 style="font-size:28px;margin:14px 0 6px;font-weight:700;">จับคู่คำศัพท์ &amp; บวก-ลบเลข</h2>
+        <p style="font-size:17px;opacity:.92;margin:0;flex:1;">หยิบการ์ดคำตอบไปจับคู่กับโจทย์<br>4 วิชา · คลังวิชาละ 50 ข้อ</p>
+        <div class="play" style="background:#fde047;color:#7c2d12;">เล่นเลย ▶</div>
+      </a>
+
+      <a class="glass card" href="trace-thai-letters-AR.html">
+        <div style="font-size:74px;line-height:1;">✏️ ก ✍️</div>
+        <h2 style="font-size:28px;margin:14px 0 6px;font-weight:700;">เขียน ก–ฮ ตามเส้นประ</h2>
+        <p style="font-size:17px;opacity:.92;margin:0;flex:1;">ลากปลายนิ้วเขียนตามจุดเส้นประ<br>พยัญชนะไทยครบ 44 ตัว</p>
+        <div class="play" style="background:#4ade80;color:#064e3b;">เล่นเลย ▶</div>
+      </a>
+
+    </div>
+
+    <p style="text-align:center;opacity:.8;font-size:15px;margin-top:22px;">
+      เปิดผ่าน Live Server (เพื่อให้ใช้กล้องได้) แล้วคลิกเกมที่ต้องการ
+    </p>
+  </div>
+</body>
+</html>
